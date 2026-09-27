@@ -1,0 +1,8 @@
+== helm uninstall ==
+release "cap" uninstalled
+== removing StatefulSet PVCs (helm leaves these) ==
+persistentvolumeclaim "data-cap-minio-0" deleted from cap namespace
+persistentvolumeclaim "data-cap-mysql-0" deleted from cap namespace
+No resources found
+== verifying nothing is left in cap ==
+CLEAN: no Cap resources remain in namespace cap.
