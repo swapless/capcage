@@ -1,0 +1,139 @@
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "web") | nindent 4 }}
+  {{- if .Values.metrics.enabled }}
+  annotations:
+    # cap-web exposes no native /metrics; the customer scrapes liveness via blackbox
+    # (see docs/metrics.md). We still annotate the port for discovery.
+    prometheus.io/probe: "true"
+  {{- end }}
+spec:
+  selector:
+    {{- include "cap.selectorLabels" (dict "root" . "component" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.web.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "web") | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cap.selectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cap.labels" . | nindent 8 }}
+        {{- include "cap.selectorLabels" (dict "root" . "component" "web") | nindent 8 }}
+    spec:
+      {{- include "cap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        # Cap runs migrations in-process ~5s after boot and exits(1) if MySQL isn't reachable
+        # (restart-loop). Gate startup on MySQL being ready to avoid that.
+        - name: wait-for-mysql
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.mysql) }}
+          imagePullPolicy: {{ .Values.images.mysql.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_PASSWORD } }
+          command: ["sh", "-c"]
+          args:
+            - |
+              until mysqladmin ping -h {{ $fullname }}-mysql -u{{ .Values.mysql.user }} -p"$MYSQL_PASSWORD" --silent; do
+                echo "waiting for mysql..."; sleep 3;
+              done
+      containers:
+        - name: web
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.web) }}
+          imagePullPolicy: {{ .Values.images.web.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.web.securityContext | nindent 12 }}
+          env:
+            # --- credentials pulled from the Secret ---
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_PASSWORD } }
+            - name: NEXTAUTH_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: NEXTAUTH_SECRET } }
+            - name: DATABASE_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: DATABASE_ENCRYPTION_KEY } }
+            - name: MEDIA_SERVER_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MEDIA_SERVER_WEBHOOK_SECRET } }
+            - name: CAP_AWS_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_USER } }
+            - name: CAP_AWS_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_PASSWORD } }
+            # --- DATABASE_URL composed at runtime; password never in a ConfigMap ---
+            - name: DATABASE_URL
+              value: "mysql://{{ .Values.mysql.user }}:$(MYSQL_PASSWORD)@{{ $fullname }}-mysql:{{ .Values.mysql.port }}/{{ .Values.mysql.database }}"
+            # --- URLs / S3 config ---
+            - name: WEB_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: NEXTAUTH_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: CAP_AWS_BUCKET
+              value: {{ .Values.minio.bucket | quote }}
+            - name: CAP_AWS_REGION
+              value: {{ .Values.minio.region | quote }}
+            - name: S3_INTERNAL_ENDPOINT
+              value: "http://{{ $fullname }}-minio:{{ .Values.minio.apiPort }}"
+            - name: S3_PUBLIC_ENDPOINT
+              value: {{ .Values.s3PublicUrl | quote }}
+            - name: S3_PATH_STYLE
+              value: "true"
+            - name: MEDIA_SERVER_URL
+              value: "http://{{ $fullname }}-media-server:{{ .Values.mediaServer.port }}"
+            - name: MEDIA_SERVER_WEBHOOK_URL
+              value: "http://{{ $fullname }}-web:{{ .Values.web.port }}"
+            {{- include "cap.proxyEnv" . | nindent 12 }}
+            {{- with .Values.web.extraEnv }}
+            {{- range $k, $v := . }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- include "cap.caVolumeMount" . | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- include "cap.caVolume" . | nindent 8 }}

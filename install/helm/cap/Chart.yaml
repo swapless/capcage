@@ -1,0 +1,19 @@
+apiVersion: v2
+name: cap
+description: >-
+  Packages the Cap self-hosted stack (Next.js web, FFmpeg media-server, MySQL, MinIO/S3)
+  for a locked-down customer Kubernetes namespace. Assumes nothing about the cluster:
+  no required CNI, no cluster CRDs, no assumed StorageClass, no assumed ingress controller,
+  no assumed registry. Everything is a value with a self-contained default.
+type: application
+# Chart version is independent of the app version.
+version: 0.1.0
+# Upstream Cap has no semver release for self-host; we track the image tag we mirror.
+appVersion: "main"
+maintainers:
+  - name: SRE Project Round
+keywords:
+  - cap
+  - screen-recording
+  - air-gapped
+  - byoc

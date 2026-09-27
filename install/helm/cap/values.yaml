@@ -1,0 +1,239 @@
+# =============================================================================
+# Cap install — values contract
+#
+# Guiding principle: ASSUME NOTHING about the customer cluster.
+# Every external dependency (registry, StorageClass, ingress, proxy, CA) is a
+# value with a self-contained default. Two profiles (profiles/values-kind.yaml,
+# profiles/values-gke.yaml) override only what differs per target.
+# =============================================================================
+
+# -- Applied to every workload; lets a customer point ALL images at one registry.
+global:
+  # If set, this registry PREFIX overrides the per-image `.registry` for every image.
+  # This is the single knob that flips the whole install onto a private registry:
+  #   --set global.imageRegistry=registry.halden.internal/cap
+  imageRegistry: ""
+  # Pull secret(s) for the private registry. Names of pre-created dockerconfigjson secrets.
+  imagePullSecrets: []
+  # Common labels stamped on everything (helps the platform team's policies/quotas).
+  commonLabels: {}
+
+# -----------------------------------------------------------------------------
+# Images. Digests are pinned by supply-chain/mirror.sh; tags are the fallback.
+# When global.imageRegistry is set, `.registry` here is ignored.
+# -----------------------------------------------------------------------------
+images:
+  web:
+    registry: ghcr.io
+    repository: capsoftware/cap-web
+    tag: "latest"
+    digest: "" # e.g. sha256:... (set by mirror.sh; preferred over tag)
+    pullPolicy: IfNotPresent
+  mediaServer:
+    # No public image exists — supply-chain/mirror.sh BUILDS this from Cap source
+    # and pushes it. There is no sensible public default.
+    registry: ""
+    repository: cap-media-server
+    tag: "local"
+    digest: ""
+    pullPolicy: IfNotPresent
+  mysql:
+    registry: docker.io
+    repository: library/mysql
+    tag: "8.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  # Object store. NOTE: MinIO removed its public container images in 2025
+  # (Docker Hub + quay both refuse anonymous pulls), so the S3-compatible
+  # backend is SeaweedFS. The value key stays `minio` for continuity; see
+  # docs/decisions.md ("Object store: MinIO -> SeaweedFS").
+  minio:
+    registry: docker.io
+    repository: chrislusf/seaweedfs
+    tag: "3.80"
+    digest: ""
+    pullPolicy: IfNotPresent
+  # S3 CLI used by the bucket-bootstrap Job (MinIO's `mc` is gone with MinIO).
+  mc:
+    registry: docker.io
+    repository: amazon/aws-cli
+    tag: "2.27.49"
+    digest: ""
+    pullPolicy: IfNotPresent
+  # mysqld_exporter sidecar for customer-scraped metrics.
+  mysqldExporter:
+    registry: docker.io
+    repository: prom/mysqld-exporter
+    tag: "v0.15.1"
+    digest: ""
+    pullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
+# The public base URL end-users hit. Drives WEB_URL / NEXTAUTH_URL and the
+# S3 public endpoint host. MUST be browser-reachable and stable.
+# -----------------------------------------------------------------------------
+publicUrl: "http://cap.halden.local:8080"
+s3PublicUrl: "http://s3.halden.local:8080"
+
+# -----------------------------------------------------------------------------
+# Secrets. Default: the chart generates strong random secrets on first install
+# and persists them (helm keeps them across upgrades via lookup). For GitOps or
+# external secret managers, set existingSecret to a pre-created Secret instead.
+# -----------------------------------------------------------------------------
+secrets:
+  # Name of a pre-created Secret with all keys; empty = chart generates them.
+  existingSecret: ""
+  # Keys expected when existingSecret is set (documented in runbook.md):
+  #   NEXTAUTH_SECRET, DATABASE_ENCRYPTION_KEY, MEDIA_SERVER_WEBHOOK_SECRET,
+  #   MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD
+
+# -----------------------------------------------------------------------------
+# Egress through the customer's forward proxy + trust their intercepting CA.
+# This is the fix for the two classic BYOC failures: default-deny egress and a
+# TLS-terminating proxy whose CA the app must trust.
+# -----------------------------------------------------------------------------
+egress:
+  proxy:
+    enabled: false # cage step flips this on
+    http: "" # e.g. http://squid.halden-platform.svc:3128
+    https: "" # e.g. http://squid.halden-platform.svc:3128
+    # Hosts that must bypass the proxy (in-cluster services, cluster CIDR).
+    noProxy: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # Inject the proxy's intercepting CA so TLS to allowlisted hosts doesn't break.
+  ca:
+    enabled: false
+    # A pre-created ConfigMap holding the CA under key ca.crt (created by the cage).
+    configMapName: "halden-proxy-ca"
+    key: "ca.crt"
+
+# -----------------------------------------------------------------------------
+# Persistence — assume NO StorageClass exists. Default binds via whatever the
+# cluster's default provisioner is (empty className), and a bundled local-path
+# provisioner is installed by the platform step for clusters that have none.
+# Customers plug in their own class or a pre-created claim.
+# -----------------------------------------------------------------------------
+persistence:
+  # "" => use cluster default StorageClass (or the bundled local-path one).
+  storageClassName: ""
+  accessModes: ["ReadWriteOnce"]
+
+# -----------------------------------------------------------------------------
+# Ingress — bring-our-own, toggleable. Ships ingress-nginx as a dependency
+# (see charts/) but can be disabled if the customer has their own.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  # If the customer already runs an ingress controller, set installController=false
+  # and point className at theirs.
+  installController: true
+  className: "nginx"
+  webHost: "cap.halden.local"
+  s3Host: "s3.halden.local"
+  tls:
+    enabled: false
+    secretName: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0" # large uploads
+
+# -----------------------------------------------------------------------------
+# Cap web (Next.js). Runs DB migrations + S3 bootstrap in-process on startup.
+# -----------------------------------------------------------------------------
+web:
+  replicas: 1
+  port: 3000
+  # Email: with no provider, Cap prints login codes to the pod log (air-gap default).
+  # To enable real email later, wire Resend/SMTP env here and add api.resend.com to
+  # the allowlist.
+  extraEnv: {}
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities: { drop: ["ALL"] }
+    seccompProfile: { type: RuntimeDefault }
+
+mediaServer:
+  # Built from Cap source (no public image). Optional for the web app to serve;
+  # required for recording post-processing. Disable where its image isn't yet built.
+  enabled: true
+  replicas: 1
+  port: 3456
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "2", memory: "2Gi" }
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    capabilities: { drop: ["ALL"] }
+    seccompProfile: { type: RuntimeDefault }
+
+mysql:
+  enabled: true
+  database: "cap"
+  user: "cap"
+  port: 3306
+  storageSize: "8Gi"
+  existingClaim: ""
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  # mysql:8.0 official runs as uid 999 (mysql). fsGroup makes the PVC group-writable.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    fsGroupChangePolicy: "OnRootMismatch"
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities: { drop: ["ALL"] }
+  backup:
+    enabled: true
+    schedule: "0 2 * * *" # nightly; dumps to the MinIO bucket (stays in-cluster)
+    keep: 7
+
+minio:
+  enabled: true
+  bucket: "cap"
+  region: "us-east-1"
+  apiPort: 9000
+  consolePort: 9001
+  storageSize: "20Gi"
+  existingClaim: ""
+  # standalone (1 drive) | distributed (see runbook for 4x setup)
+  mode: "standalone"
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    fsGroupChangePolicy: "OnRootMismatch"
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities: { drop: ["ALL"] }
+
+# -----------------------------------------------------------------------------
+# Metrics — customer-scraped PULL model. Nothing is pushed anywhere.
+# -----------------------------------------------------------------------------
+metrics:
+  enabled: true
+  # Emit Prometheus-Operator ServiceMonitors. If the customer has no Operator,
+  # leave this false and rely on the prometheus.io/scrape annotations we also set.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    labels: {} # e.g. release: kube-prometheus-stack
+  mysqldExporter:
+    enabled: true

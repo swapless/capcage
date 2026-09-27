@@ -1,0 +1,47 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.webHost | quote }}
+        - {{ .Values.ingress.s3Host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.webHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-web
+                port:
+                  number: {{ .Values.web.port }}
+    {{- if .Values.minio.enabled }}
+    # Public S3 endpoint (browser-facing) so recordings play back.
+    - host: {{ .Values.ingress.s3Host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-minio
+                port:
+                  number: {{ .Values.minio.apiPort }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,65 @@
+{{- if .Values.minio.enabled }}
+{{- /* Bucket bootstrap against the SeaweedFS S3 endpoint via aws-cli. Idempotent. */ -}}
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-minio-setup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "minio-setup") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "cap.selectorLabels" (dict "root" . "component" "minio-setup") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "cap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: aws
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.mc) }}
+          imagePullPolicy: {{ .Values.images.mc.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_USER } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_PASSWORD } }
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.minio.region | quote }}
+            - name: S3_ENDPOINT
+              value: "http://{{ $fullname }}-minio:{{ .Values.minio.apiPort }}"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "waiting for S3 endpoint $S3_ENDPOINT ..."
+              for i in $(seq 1 60); do
+                if aws --endpoint-url "$S3_ENDPOINT" s3 ls >/dev/null 2>&1; then break; fi
+                sleep 3
+              done
+              # Create the bucket if missing (idempotent).
+              if ! aws --endpoint-url "$S3_ENDPOINT" s3 ls "s3://{{ .Values.minio.bucket }}" >/dev/null 2>&1; then
+                aws --endpoint-url "$S3_ENDPOINT" s3 mb "s3://{{ .Values.minio.bucket }}"
+              fi
+              echo "bucket {{ .Values.minio.bucket }} ready"
+          resources:
+            requests: { cpu: "25m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+{{- end }}

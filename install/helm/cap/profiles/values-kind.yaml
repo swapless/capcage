@@ -1,0 +1,24 @@
+# Profile: local kind cage.
+# Only what differs from values.yaml for the constrained local target.
+
+# Persistence: leave storageClassName empty to use kind's default provisioner
+# (rancher.io/local-path, StorageClass "standard"). Proves the "assume no
+# specific StorageClass" default binds on a real cluster.
+persistence:
+  storageClassName: ""
+
+# media-server has no public image and must be built from Cap source; enable it
+# once its image is built and loaded (see supply-chain/mirror.sh).
+mediaServer:
+  enabled: false
+
+# For the first bring-up we reach the app via port-forward; the ingress
+# controller is installed by the platform step in the full flow.
+ingress:
+  enabled: false
+  installController: false
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false # no Prometheus Operator in the bare cage

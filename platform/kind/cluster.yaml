@@ -1,0 +1,35 @@
+# The cage — a kind cluster that simulates Halden Pharma's constrained environment.
+#
+# Design notes:
+# - disableDefaultCNI is left FALSE: we keep kindnet (a plain, NetworkPolicy-capable CNI).
+#   We deliberately do NOT use Cilium — the customer's CNI is unknown, so ALL enforcement
+#   must be CNI-agnostic (default-deny NetworkPolicy + the Squid egress proxy).
+# - PodSecurity is enforced per-namespace via labels (see platform/constraints), not via a
+#   cluster-wide API-server config. This keeps kind bring-up robust and lets us bring Cap up
+#   first, then tighten the cage around it.
+# - An extra worker with a taint gives us "a cluster that fights you": the tenant install must
+#   schedule correctly rather than assuming a single empty node.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: halden
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # ingress-nginx (tenant plane) reachable from the host for the recorded demo.
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
+  - role: worker
+    # "Something that fights you": a tainted node the tenant must tolerate or avoid.
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          taints:
+            - key: "halden.io/reserved"
+              value: "platform"
+              effect: "NoSchedule"
+  - role: worker

@@ -1,0 +1,133 @@
+{{- if .Values.mysql.enabled }}
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 4 }}
+  {{- if .Values.metrics.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9104"
+    prometheus.io/path: "/metrics"
+  {{- end }}
+spec:
+  # Headless: stable network identity for the StatefulSet.
+  clusterIP: None
+  selector:
+    {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 4 }}
+  ports:
+    - name: mysql
+      port: {{ .Values.mysql.port }}
+      targetPort: mysql
+    {{- if and .Values.metrics.enabled .Values.metrics.mysqldExporter.enabled }}
+    - name: metrics
+      port: 9104
+      targetPort: metrics
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 4 }}
+spec:
+  serviceName: {{ $fullname }}-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cap.labels" . | nindent 8 }}
+        {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 8 }}
+    spec:
+      {{- include "cap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.mysql.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mysql
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.mysql) }}
+          imagePullPolicy: {{ .Values.images.mysql.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.mysql.containerSecurityContext | nindent 12 }}
+          args:
+            # utf8mb4 default; bind all; keep it simple for a single-writer STS.
+            - "--default-authentication-plugin=mysql_native_password"
+          env:
+            - name: MYSQL_DATABASE
+              value: {{ .Values.mysql.database | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.mysql.user | quote }}
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_ROOT_PASSWORD } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_PASSWORD } }
+          ports:
+            - name: mysql
+              containerPort: {{ .Values.mysql.port }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+        {{- if and .Values.metrics.enabled .Values.metrics.mysqldExporter.enabled }}
+        - name: mysqld-exporter
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.mysqldExporter) }}
+          imagePullPolicy: {{ .Values.images.mysqldExporter.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.mysql.containerSecurityContext | nindent 12 }}
+          args:
+            - "--mysqld.address=127.0.0.1:{{ .Values.mysql.port }}"
+            - "--mysqld.username=root"
+          env:
+            - name: MYSQLD_EXPORTER_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_ROOT_PASSWORD } }
+          ports:
+            - name: metrics
+              containerPort: 9104
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "100m", memory: "128Mi" }
+        {{- end }}
+      volumes:
+        {{- if .Values.mysql.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.mysql.existingClaim }}
+        {{- end }}
+  {{- if not .Values.mysql.existingClaim }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{ toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- if .Values.persistence.storageClassName }}
+        storageClassName: {{ .Values.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mysql.storageSize | quote }}
+  {{- end }}
+{{- end }}

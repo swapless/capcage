@@ -1,0 +1,92 @@
+{{- $fullname := include "cap.fullname" . -}}
+{{- if .Values.mediaServer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-media-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "media-server") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cap.selectorLabels" (dict "root" . "component" "media-server") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.mediaServer.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-media-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "media-server") | nindent 4 }}
+spec:
+  replicas: {{ .Values.mediaServer.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cap.selectorLabels" (dict "root" . "component" "media-server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cap.labels" . | nindent 8 }}
+        {{- include "cap.selectorLabels" (dict "root" . "component" "media-server") | nindent 8 }}
+    spec:
+      {{- include "cap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: media-server
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.mediaServer) }}
+          imagePullPolicy: {{ .Values.images.mediaServer.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.mediaServer.securityContext | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.mediaServer.port | quote }}
+            - name: MEDIA_SERVER_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MEDIA_SERVER_WEBHOOK_SECRET } }
+            - name: MEDIA_SERVER_WEBHOOK_URL
+              value: "http://{{ $fullname }}-web:{{ .Values.web.port }}"
+            - name: CAP_AWS_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_USER } }
+            - name: CAP_AWS_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_PASSWORD } }
+            - name: CAP_AWS_BUCKET
+              value: {{ .Values.minio.bucket | quote }}
+            - name: CAP_AWS_REGION
+              value: {{ .Values.minio.region | quote }}
+            - name: S3_INTERNAL_ENDPOINT
+              value: "http://{{ $fullname }}-minio:{{ .Values.minio.apiPort }}"
+            - name: S3_PUBLIC_ENDPOINT
+              value: {{ .Values.s3PublicUrl | quote }}
+            - name: S3_PATH_STYLE
+              value: "true"
+            {{- include "cap.proxyEnv" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.mediaServer.port }}
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.mediaServer.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- include "cap.caVolumeMount" . | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- include "cap.caVolume" . | nindent 8 }}
+{{- end }}

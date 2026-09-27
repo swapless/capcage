@@ -1,0 +1,31 @@
+# secrets & keys — never commit
+*.key
+*.pem
+cosign.key
+*.tfvars
+!example.tfvars
+.env
+.env.*
+secrets/
+
+# terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# helm
+install/helm/**/charts/*.tgz
+install/helm/**/Chart.lock
+
+# local tooling / build
+bin/
+tmp/
+*.log
+!evidence/*.log
+
+# os
+.DS_Store
+
+# assignment brief (not part of the deliverable)
+*.pdf

@@ -1,0 +1,20 @@
+Cap installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components:
+  web           {{ include "cap.image" (dict "root" . "img" .Values.images.web) }}
+  media-server  {{ include "cap.image" (dict "root" . "img" .Values.images.mediaServer) }}
+  mysql         {{ include "cap.image" (dict "root" . "img" .Values.images.mysql) }}  (StatefulSet + PVC)
+  minio         {{ include "cap.image" (dict "root" . "img" .Values.images.minio) }}  (StatefulSet + PVC)
+
+Reach the app:
+{{- if .Values.ingress.enabled }}
+  Ingress host: {{ .Values.publicUrl }}  (add "{{ .Values.ingress.webHost }}" to /etc/hosts -> ingress IP)
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cap.fullname" . }}-web {{ .Values.web.port }}:{{ .Values.web.port }}
+{{- end }}
+
+No email provider is configured, so login codes are printed to the web log:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "cap.fullname" . }}-web | grep -i "login"
+
+Egress proxy: {{ if .Values.egress.proxy.enabled }}ENABLED ({{ .Values.egress.proxy.https }}){{ else }}disabled{{ end }}
+Proxy CA injection: {{ if .Values.egress.ca.enabled }}ENABLED{{ else }}disabled{{ end }}

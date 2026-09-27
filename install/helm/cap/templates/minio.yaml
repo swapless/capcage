@@ -1,0 +1,113 @@
+{{- if .Values.minio.enabled }}
+{{- /*
+  Object store: SeaweedFS (S3-compatible). Replaces MinIO, whose public images
+  were withdrawn in 2025. Service name/port kept as `-minio`/9000 so the app and
+  ingress wiring are unchanged. Runs all-in-one (master+volume+filer+s3) in one
+  process; only the S3 port is exposed to clients. See docs/decisions.md.
+*/ -}}
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "minio") | nindent 4 }}
+  {{- if .Values.metrics.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9091"
+    prometheus.io/path: "/metrics"
+  {{- end }}
+spec:
+  selector:
+    {{- include "cap.selectorLabels" (dict "root" . "component" "minio") | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ .Values.minio.apiPort }}
+      targetPort: api
+    {{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: 9091
+      targetPort: metrics
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+    {{- include "cap.selectorLabels" (dict "root" . "component" "minio") | nindent 4 }}
+spec:
+  serviceName: {{ $fullname }}-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cap.selectorLabels" (dict "root" . "component" "minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cap.labels" . | nindent 8 }}
+        {{- include "cap.selectorLabels" (dict "root" . "component" "minio") | nindent 8 }}
+    spec:
+      {{- include "cap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.minio.podSecurityContext | nindent 8 }}
+      containers:
+        - name: seaweedfs
+          image: {{ include "cap.image" (dict "root" . "img" .Values.images.minio) }}
+          imagePullPolicy: {{ .Values.images.minio.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.minio.containerSecurityContext | nindent 12 }}
+          command: ["weed"]
+          args:
+            - "server"
+            - "-dir=/data"
+            - "-ip.bind=0.0.0.0"
+            - "-s3"
+            - "-s3.port={{ .Values.minio.apiPort }}"
+            - "-filer"
+            - "-metricsPort=9091"
+            - "-master.volumeSizeLimitMB=1024"
+          ports:
+            - name: api
+              containerPort: {{ .Values.minio.apiPort }}
+            - name: metrics
+              containerPort: 9091
+          readinessProbe:
+            tcpSocket: { port: api }
+            initialDelaySeconds: 8
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            tcpSocket: { port: api }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        {{- if .Values.minio.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.minio.existingClaim }}
+        {{- end }}
+  {{- if not .Values.minio.existingClaim }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{ toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- if .Values.persistence.storageClassName }}
+        storageClassName: {{ .Values.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.minio.storageSize | quote }}
+  {{- end }}
+{{- end }}
