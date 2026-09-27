@@ -1,0 +1,85 @@
+# "A runner with no way out." A CI runner namespace whose pods can reach the
+# Kubernetes API and the private registry to do their job, but have NO route to the
+# internet — so a compromised build can't exfiltrate. Proven by the demo Job below,
+# which tries to reach the internet and fails.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+# Default-deny egress; allow ONLY DNS, the Kubernetes API, and the private registry.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: ci
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: ci
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-registry
+  namespace: ci
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: halden-platform } }
+          podSelector: { matchLabels: { app: registry } }
+      ports: [{ protocol: TCP, port: 5000 }]
+---
+# Demo Job: prove there is no way out.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: no-way-out-check
+  namespace: ci
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: { app: runner }
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: check
+          image: docker.io/amazon/aws-cli:2.27.49
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              echo "runner attempting egress to the internet..."
+              if curl -s -m 6 -o /dev/null https://example.com; then
+                echo "FAIL: runner reached the internet — it has a way out"; exit 1
+              else
+                echo "OK: runner has NO way out (egress blocked)"; exit 0
+              fi
+          resources:
+            requests: { cpu: "25m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }

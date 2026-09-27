@@ -1,0 +1,53 @@
+# Profile: real cloud target (GKE dev cluster).
+# Same chart as the kind cage — only the substrate differs, which is the whole point
+# (the abstraction is real, not hand-fitted). No managed services: MySQL and the
+# object store still run in-cluster; only storage + registry + hostnames change.
+
+# Point every image at your private registry (mirror.sh pushes here; the cage's
+# admission policy allows only this prefix). Override on the CLI or set here.
+global:
+  imageRegistry: "" # e.g. REGION-docker.pkg.dev/PROJECT/cap  — set via --set or here
+  imagePullSecrets: [] # e.g. [regcred] — a dockerconfigjson secret you pre-create
+
+# Plug in the cluster's StorageClass (or leave "" to use its default). We do NOT
+# assume premium-rwo/standard exists — set what your cluster actually has.
+persistence:
+  storageClassName: "" # e.g. "standard-rwo" on GKE, or your own
+
+# media-server: enable once its image is mirrored (built by mirror.sh with CAP_SRC).
+mediaServer:
+  enabled: true
+
+# Real ingress + real hostnames. Use your own controller if you have one:
+#   --set ingress.installController=false --set ingress.className=<yours>
+ingress:
+  enabled: true
+  installController: true
+  className: nginx
+  webHost: cap.example.com # <- your DNS
+  s3Host: s3.cap.example.com # <- your DNS (browser-reachable for playback)
+  tls:
+    enabled: false # set true + secretName once you have a cert
+
+publicUrl: "https://cap.example.com"
+s3PublicUrl: "https://s3.cap.example.com"
+
+# Route egress through the customer's proxy and trust its CA (enable when the real
+# cage/proxy is present). Off here by default.
+egress:
+  proxy:
+    enabled: false
+  ca:
+    enabled: false
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true # GKE dev cluster likely runs the Prometheus Operator
+    labels: {} # add your Prometheus's release selector, e.g. release: kube-prometheus-stack
+
+# A little more headroom on a real cluster.
+mysql:
+  storageSize: "20Gi"
+minio:
+  storageSize: "50Gi"

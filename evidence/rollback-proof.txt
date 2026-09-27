@@ -1,0 +1,17 @@
+=== current good revision ===
+1       	Sun Sep 27 10:08:18 2026	superseded	cap-0.1.0	main       	Install complete
+2       	Sun Sep 27 10:44:18 2026	superseded	cap-0.1.0	main       	Upgrade complete
+3       	Sun Sep 27 10:47:41 2026	deployed  	cap-0.1.0	main       	Upgrade complete
+
+=== push a BROKEN upgrade (bad web tag), no --atomic -> half-applied ===
+Egress proxy: disabled
+Proxy CA injection: disabled
+--- half-applied state: new web pod broken ---
+cap-web-5f4bd48c64-tr242   1/1     Running           0          16m
+cap-web-84cd9bbfd7-qjj9v   0/1     PodInitializing   0          13s
+
+=== ROLL BACK to previous revision ===
+Rollback was a success! Happy Helming!
+deployment "cap-web" successfully rolled out
+--- recovered web image ---
+ghcr.io/capsoftware/cap-web:mirrored-8ee4cbd

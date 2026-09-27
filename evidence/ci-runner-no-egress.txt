@@ -1,0 +1,5 @@
+# 'A runner with no way out' — CI runner egress proof
+# 2026-09-27T11:04:00Z
+
+runner attempting egress to the internet...
+OK: runner has NO way out (egress blocked)
