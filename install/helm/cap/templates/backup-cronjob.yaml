@@ -1,0 +1,78 @@
+{{- if and .Values.mysql.enabled .Values.mysql.backup.enabled }}
+{{- $fullname := include "cap.fullname" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fullname }}-mysql-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cap.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.mysql.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.mysql.backup.keep }}
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "cap.selectorLabels" (dict "root" . "component" "mysql-backup") | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          {{- include "cap.imagePullSecrets" . | nindent 10 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+            seccompProfile: { type: RuntimeDefault }
+          initContainers:
+            # 1) dump the DB into a shared volume
+            - name: dump
+              image: {{ include "cap.image" (dict "root" . "img" .Values.images.mysql) }}
+              imagePullPolicy: {{ .Values.images.mysql.pullPolicy }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MYSQL_ROOT_PASSWORD } }
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  mysqldump -h {{ $fullname }}-mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+                    --single-transaction --routines --databases {{ .Values.mysql.database }} \
+                    > /work/cap.sql
+                  echo "dumped $(wc -c < /work/cap.sql) bytes"
+              volumeMounts:
+                - { name: work, mountPath: /work }
+          containers:
+            # 2) upload the dump to the in-cluster S3 bucket (nothing leaves the network)
+            - name: upload
+              image: {{ include "cap.image" (dict "root" . "img" .Values.images.mc) }}
+              imagePullPolicy: {{ .Values.images.mc.pullPolicy }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+              env:
+                - { name: HOME, value: /tmp }
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_USER } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ include "cap.secretName" . }}, key: MINIO_ROOT_PASSWORD } }
+                - { name: AWS_DEFAULT_REGION, value: {{ .Values.minio.region | quote }} }
+                - { name: S3_ENDPOINT, value: "http://{{ $fullname }}-minio:{{ .Values.minio.apiPort }}" }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  KEY="backups/cap-$(cat /proc/sys/kernel/random/uuid).sql"
+                  aws --endpoint-url "$S3_ENDPOINT" s3 cp /work/cap.sql "s3://{{ .Values.minio.bucket }}/$KEY"
+                  echo "uploaded s3://{{ .Values.minio.bucket }}/$KEY"
+              volumeMounts:
+                - { name: work, mountPath: /work }
+          volumes:
+            - { name: work, emptyDir: {} }
+{{- end }}

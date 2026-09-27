@@ -1,0 +1,14 @@
+== 1. Cap pods Ready ==
+  PASS: all pods ready
+== 2. Namespace-scoped RBAC (no cluster power) ==
+  PASS: deployer cannot get nodes
+== 3. Default-deny egress bites (off-namespace blocked) ==
+  PASS: egress to k8s API blocked by netpol
+== 4. Admission policy denies bad images ==
+  PASS: off-registry image denied
+== 5. Proxy denial log has real denies ==
+  PASS: proxy logged denials
+== 6. App serving ==
+  PASS: cap-web serving (HTTP 200)
+
+VERIFY: ALL CHECKS PASSED
