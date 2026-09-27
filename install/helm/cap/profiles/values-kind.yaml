@@ -1,6 +1,14 @@
 # Profile: local kind cage.
 # Only what differs from values.yaml for the constrained local target.
 
+# cap-web is pinned to a non-:latest tag to satisfy the cage's admission policy.
+# (Upstream only publishes :latest; the real supply-chain/mirror.sh pins by DIGEST
+# against the private registry. On kind we use a pinned tag because `kind load`
+# carries tags, not digest associations — digest pinning works on a real registry.)
+images:
+  web:
+    tag: "mirrored-8ee4cbd"
+
 # Persistence: leave storageClassName empty to use kind's default provisioner
 # (rancher.io/local-path, StorageClass "standard"). Proves the "assume no
 # specific StorageClass" default binds on a real cluster.

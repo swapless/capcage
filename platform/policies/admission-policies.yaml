@@ -1,0 +1,53 @@
+# Structural admission control via native ValidatingAdmissionPolicy (CEL, GA since
+# k8s 1.30). No external controller required — "assume nothing" applies to the
+# platform too. Signature verification (cosign) is layered on top by Kyverno
+# (platform/policies/kyverno-verify-images.yaml), since VAP can't fetch signatures.
+#
+# Scoped to the tenant namespace `cap`. Platform infra (proxy etc.) is exempt.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cap-image-provenance
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    # The ONLY registries the tenant may pull from. In the real cage this is just
+    # the customer's private registry; here we also allow the sources we pre-loaded.
+    - name: allowedRegistries
+      expression: >-
+        ["registry.halden.internal/", "docker.io/", "ghcr.io/"]
+    - name: allImages
+      expression: >-
+        object.spec.containers.map(c, c.image) +
+        (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])
+  validations:
+    # 1. Every image must come from an allowed registry.
+    - expression: >-
+        variables.allImages.all(img,
+          variables.allowedRegistries.exists(r, img.startsWith(r)))
+      messageExpression: >-
+        "image not from an allowed registry; allowed: " + variables.allowedRegistries.join(", ")
+    # 2. No :latest and no untagged/undigested images (must be pinned).
+    - expression: >-
+        variables.allImages.all(img,
+          !img.endsWith(":latest") && (img.contains("@sha256:") || img.matches(".+:[^/]+$")))
+      message: "images must be pinned to a specific tag (not :latest) or a digest"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cap-image-provenance
+spec:
+  policyName: cap-image-provenance
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: cap

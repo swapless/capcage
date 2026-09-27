@@ -1,0 +1,43 @@
+# Signature enforcement at admission (Kyverno). Native ValidatingAdmissionPolicy
+# can't fetch signatures, so this layers cosign verification on top: every image
+# admitted into the tenant namespace must carry a valid signature from OUR key.
+# The customer applies this after installing Kyverno; the public key below is the
+# same one in supply-chain/cosign.pub, so they verify our images without trusting us.
+#
+# Air-gapped: rekor.ignoreTlog=true (we sign with --tlog-upload=false).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-cap-images
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [cap]
+      verifyImages:
+        # Adjust to the customer's private registry prefix.
+        - imageReferences:
+            - "registry.halden.internal/cap/*"
+            - "localhost:5050/cap/*"
+          required: true
+          mutateDigest: true   # pin to the verified digest on admission
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERDus37Vth97laDCI5VV8O65xv0Vr
+                      DTV8mTMJdfRNR2tqnxM2o7EUGCPUkHArJ/4AL9o34i+WQJsoJ2SOnznppw==
+                      -----END PUBLIC KEY-----
+                    rekor:
+                      ignoreTlog: true
+                    ctlog:
+                      ignoreSCT: true

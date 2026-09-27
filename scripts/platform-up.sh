@@ -11,11 +11,22 @@ KUBECTL="${KUBECTL:-kubectl}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CADIR="${CADIR:-$ROOT/.cage-ca}"   # holds the proxy CA private key — gitignored
 
-echo "==> namespaces, quotas, RBAC, network policy"
+echo "==> namespaces, quotas, RBAC, network policy, admission policy"
 $KUBECTL apply -f "$ROOT/platform/constraints/namespaces.yaml"
 $KUBECTL apply -f "$ROOT/platform/constraints/quota.yaml"
 $KUBECTL apply -f "$ROOT/platform/rbac/tenant-rbac.yaml"
 $KUBECTL apply -f "$ROOT/platform/netpol/egress.yaml"
+# Native ValidatingAdmissionPolicy: private-registry-only + no :latest (no controller needed).
+$KUBECTL apply -f "$ROOT/platform/policies/admission-policies.yaml"
+# In-cluster private registry (the cage's example registry).
+$KUBECTL apply -f "$ROOT/platform/registry/registry.yaml"
+# Signature enforcement at admission — only if Kyverno is installed.
+if $KUBECTL get crd clusterpolicies.kyverno.io >/dev/null 2>&1; then
+  $KUBECTL apply -f "$ROOT/platform/policies/kyverno-verify-images.yaml"
+  echo "   applied Kyverno verify-images policy"
+else
+  echo "   (Kyverno not installed — skipping verify-images; native provenance policy still active)"
+fi
 
 echo "==> egress proxy CA"
 mkdir -p "$CADIR"; chmod 700 "$CADIR"

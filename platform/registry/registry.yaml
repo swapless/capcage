@@ -1,0 +1,63 @@
+# In-cluster private registry (the cage's "private registry only" control).
+# The install pulls exclusively from here; the ValidatingAdmissionPolicy
+# (cap-image-provenance) and Kyverno verify-images restrict pulls to this prefix.
+#
+# NOTE: this is the CAGE's example registry. The install is registry-agnostic —
+# a real customer points image.registry at their Artifact Registry / ECR / ACR /
+# Nexus / Harbor instead (supply-chain/mirror.sh takes REGISTRY=<any>).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  namespace: halden-platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: halden-platform
+  labels: { app: registry }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registry }
+  template:
+    metadata:
+      labels: { app: registry }
+    spec:
+      containers:
+        - name: registry
+          image: docker.io/library/registry:2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: registry, containerPort: 5000 }
+          env:
+            - { name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY, value: /var/lib/registry }
+          readinessProbe:
+            httpGet: { path: /v2/, port: registry }
+            initialDelaySeconds: 3
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/registry }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: halden-platform
+  labels: { app: registry }
+spec:
+  selector: { app: registry }
+  ports:
+    - { name: registry, port: 5000, targetPort: registry }

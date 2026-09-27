@@ -1,0 +1,11 @@
+# Image verification evidence — customer verifies WITHOUT trusting us
+# 2026-09-27T10:52:58Z
+
+## [PASS] verify with the published public key (supply-chain/cosign.pub):
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - The signatures were verified against the specified public key
+
+## [FAIL-EXPECTED] verify with an ATTACKER key (must be rejected):
+Error: no matching signatures: invalid signature when validating ASN.1 encoded signature
+error during command execution: no matching signatures: invalid signature when validating ASN.1 encoded signature
