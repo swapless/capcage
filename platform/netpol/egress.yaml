@@ -1,0 +1,66 @@
+# Default-deny egress for the tenant namespace, CNI-agnostic (plain NetworkPolicy —
+# works on any conformant CNI; no Cilium assumed). "Nothing leaves our network."
+#
+# Nothing in `cap` may egress EXCEPT:
+#   1. cluster DNS (so names resolve),
+#   2. the platform egress proxy (Squid) — the ONLY path off-namespace,
+#   3. other pods in the same namespace (web <-> mysql <-> s3 <-> media-server).
+# Everything else is denied. Any external call must go through Squid, where it is
+# allowlisted or logged as a denial.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: cap
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  # no egress rules => deny all egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: cap
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-proxy
+  namespace: cap
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: halden-platform
+          podSelector:
+            matchLabels:
+              app: egress-proxy
+      ports:
+        - { protocol: TCP, port: 3128 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-in-namespace
+  namespace: cap
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {} # any pod in the same namespace

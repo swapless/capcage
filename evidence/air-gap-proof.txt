@@ -1,0 +1,15 @@
+== 1. Force the proxy into full-deny (empty allowlist) ==
+configmap/egress-allowlist unchanged
+deployment.apps/egress-proxy restarted
+Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
+deployment "egress-proxy" successfully rolled out
+== 2. App still serving? (cap-web HTTP status) ==
+   OK: cap-web returned HTTP 200 with the proxy in full deny
+== 3. Egress actually blocked? (tenant -> internet via proxy must be denied) ==
+command terminated with exit code 1
+   OK: proxy denied egress (403)
+== 4. Direct egress (bypassing proxy) also blocked by NetworkPolicy? ==
+   OK: direct egress blocked by NetworkPolicy
+
+AIR-GAP ASSERTION PASSED: app serves with the network in full deny.

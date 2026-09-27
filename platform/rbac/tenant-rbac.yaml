@@ -1,0 +1,53 @@
+# Namespace-scoped RBAC — "you get a namespace on a shared cluster. No cluster-admin."
+# The deployer identity used to install Cap can manage ONLY namespaced objects in
+# `cap`, and has zero cluster-scoped power. Verify with:
+#   kubectl auth can-i --list --as=system:serviceaccount:cap:cap-deployer -n cap
+#   kubectl auth can-i get nodes --as=system:serviceaccount:cap:cap-deployer   # -> no
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cap-deployer
+  namespace: cap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cap-deployer
+  namespace: cap
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, configmaps, secrets, persistentvolumeclaims, serviceaccounts, events]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [monitoring.coreos.com]
+    resources: [servicemonitors, podmonitors]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only on pod logs/exec for on-call debugging (no node/cluster access).
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cap-deployer
+  namespace: cap
+subjects:
+  - kind: ServiceAccount
+    name: cap-deployer
+    namespace: cap
+roleRef:
+  kind: Role
+  name: cap-deployer
+  apiGroup: rbac.authorization.k8s.io

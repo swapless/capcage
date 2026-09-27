@@ -1,0 +1,21 @@
+# Namespaces with their security posture.
+# - cap: the TENANT namespace. Enforces the restricted Pod Security Standard, so
+#   the install must run non-root, drop capabilities, and set seccomp — or admission
+#   rejects it. This is part of "something that fights you".
+# - halden-platform: infra we (as the platform team) run — proxy, etc. Privileged.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cap
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: halden-platform
+  labels:
+    pod-security.kubernetes.io/enforce: privileged

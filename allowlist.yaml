@@ -1,0 +1,69 @@
+# =============================================================================
+# Egress allowlist — Cap install in the Halden cage.
+#
+# HEADLINE: the PERMANENT (runtime) allowlist is EMPTY. Once the images are
+# mirrored into the private registry, Cap needs ZERO external egress to run.
+# This is proven by the air-gap assertion (proxy set to full-deny, app still
+# serving) — see `make air-gap` and evidence/.
+#
+# Derivation: not guessed. Start from full-deny, install, read the proxy denial
+# log, add the minimum entry, repeat. Every entry below is justified line-by-line.
+#
+# Scope:
+#   permanent     - required at runtime, forever. (Currently: none.)
+#   install_time  - needed ONCE, on the bastion that populates the private
+#                   registry (supply-chain/mirror.sh). NEVER granted to the tenant
+#                   namespace or the no-outbound CI runner.
+#   optional      - only if the customer opts into that feature; must be added
+#                   explicitly and re-justified. Off by default (keeps the air-gap).
+# =============================================================================
+
+permanent: []
+
+install_time:
+  - fqdn: ghcr.io
+    port: 443
+    component: cap-web
+    breaks_without: "cannot pull ghcr.io/capsoftware/cap-web to mirror into the private registry"
+  - fqdn: pkg-containers.githubusercontent.com
+    port: 443
+    component: cap-web
+    breaks_without: "ghcr.io blob storage; layer download fails"
+  - fqdn: registry-1.docker.io
+    port: 443
+    component: mysql, seaweedfs, aws-cli, mysqld-exporter
+    breaks_without: "cannot pull the Docker Hub base images to mirror"
+  - fqdn: auth.docker.io
+    port: 443
+    component: docker hub images
+    breaks_without: "Docker Hub token auth fails; pulls 401"
+  - fqdn: production.cloudflare.docker.com
+    port: 443
+    component: docker hub images
+    breaks_without: "Docker Hub blob CDN; layer download fails"
+  - fqdn: deb.debian.org
+    port: 443
+    component: media-server (build)
+    breaks_without: "apt cannot install ffmpeg into the media-server image"
+  - fqdn: security.debian.org
+    port: 443
+    component: media-server (build)
+    breaks_without: "apt security updates during media-server build fail"
+  - fqdn: registry.npmjs.org
+    port: 443
+    component: media-server (build)
+    breaks_without: "bun install cannot fetch media-server dependencies"
+
+optional:
+  - fqdn: accounts.google.com
+    port: 443
+    component: cap-web (Google SSO)
+    breaks_without: "nothing — only needed if Google login is enabled (GOOGLE_CLIENT_ID set)"
+  - fqdn: oauth2.googleapis.com
+    port: 443
+    component: cap-web (Google SSO)
+    breaks_without: "nothing — Google token exchange; only if Google login enabled"
+  - fqdn: api.resend.com
+    port: 443
+    component: cap-web (email)
+    breaks_without: "nothing — without it, login codes are printed to the cap-web log instead of emailed"

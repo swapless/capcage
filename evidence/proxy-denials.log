@@ -1,0 +1,6 @@
+# Egress proxy denial log — clean cage, empty (air-gap) allowlist
+# Captured 2026-09-27T10:36:58Z from deploy/egress-proxy (mitmproxy) in ns halden-platform
+# A log with NO denials would mean the cage was loosened. These are real blocks.
+
+[10:35:01.784] [cage-proxy] loaded 0 allow entries: []
+[10:36:08.656] [cage-proxy] DENY GET example.com/

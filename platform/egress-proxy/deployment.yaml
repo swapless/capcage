@@ -1,0 +1,82 @@
+# The customer's egress proxy (mitmproxy): the ONLY path out of the tenant namespace.
+# - Default-deny allowlist (platform/egress-proxy/allowlist.py + the egress-allowlist CM).
+# - TLS interception with the Halden CA (secret mitmproxy-ca) -> clients must trust it.
+# - Every request logged (ALLOW/DENY) -> the denial log (evidence/proxy-denials.log).
+#
+# ConfigMaps/Secret are created by scripts/platform-up.sh:
+#   cm  egress-proxy-addon  <- platform/egress-proxy/allowlist.py
+#   cm  egress-allowlist    <- allowlist.txt derived from allowlist.yaml
+#   sec mitmproxy-ca        <- generated CA (key+cert) as mitmproxy-ca.pem
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  namespace: halden-platform
+  labels: { app: egress-proxy }
+spec:
+  selector: { app: egress-proxy }
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  namespace: halden-platform
+  labels: { app: egress-proxy }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: egress-proxy }
+  template:
+    metadata:
+      labels: { app: egress-proxy }
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: ca-init
+          image: docker.io/mitmproxy/mitmproxy:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /ca/mitmproxy-ca.pem /home/mitmproxy/.mitmproxy/mitmproxy-ca.pem && echo CA installed"]
+          volumeMounts:
+            - { name: confdir, mountPath: /home/mitmproxy/.mitmproxy }
+            - { name: ca, mountPath: /ca, readOnly: true }
+      containers:
+        - name: mitmproxy
+          image: docker.io/mitmproxy/mitmproxy:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - mitmdump
+            - --listen-host=0.0.0.0
+            - --listen-port=3128
+            - --set
+            - confdir=/home/mitmproxy/.mitmproxy
+            - --set
+            - block_global=false
+            - -s
+            - /etc/proxy/allowlist.py
+          env:
+            - { name: ALLOWLIST_PATH, value: /etc/proxy/allowlist.txt }
+          ports:
+            - { name: proxy, containerPort: 3128 }
+          readinessProbe:
+            tcpSocket: { port: proxy }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          volumeMounts:
+            - { name: confdir, mountPath: /home/mitmproxy/.mitmproxy }
+            - { name: addon, mountPath: /etc/proxy/allowlist.py, subPath: allowlist.py }
+            - { name: allowlist, mountPath: /etc/proxy/allowlist.txt, subPath: allowlist.txt }
+      volumes:
+        - { name: confdir, emptyDir: {} }
+        - { name: ca, secret: { secretName: mitmproxy-ca } }
+        - { name: addon, configMap: { name: egress-proxy-addon } }
+        - { name: allowlist, configMap: { name: egress-allowlist } }

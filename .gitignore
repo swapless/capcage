@@ -29,3 +29,6 @@ tmp/
 
 # assignment brief (not part of the deliverable)
 *.pdf
+
+# generated cage CA (private key)
+.cage-ca/
