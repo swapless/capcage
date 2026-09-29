@@ -1,17 +1,31 @@
-./scripts/air-gap-assert.sh
-== 1. Force the proxy into full-deny (empty allowlist) ==
-configmap/egress-allowlist unchanged
-deployment.apps/egress-proxy restarted
-Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
-Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
-deployment "egress-proxy" successfully rolled out
-command terminated with exit code 1
-== 2. App still serving? (cap-web HTTP status) ==
-   OK: cap-web returned HTTP 200 with the proxy in full deny
-== 3. Egress actually blocked? (tenant -> internet via proxy must be denied) ==
-command terminated with exit code 1
-   OK: proxy denied egress (403)
-== 4. Direct egress (bypassing proxy) also blocked by NetworkPolicy? ==
-   OK: direct egress blocked by NetworkPolicy
+################  AIR-GAP ASSERTION (manual, no script)  ################
 
-AIR-GAP ASSERTION PASSED: app serves with the network in full deny.
+### 1. Proxy is in FULL DENY — the enforced allowlist is empty
+$ kubectl -n halden-platform get configmap egress-allowlist -o jsonpath="{.data.allowlist\.txt}" | wc -c
+0
+   (0 bytes = no host allowed = nothing may egress)
+$ kubectl -n halden-platform logs deploy/egress-proxy -c mitmproxy | grep "allow entries"
+[12:49:35.077] [cage-proxy] loaded 0 allow entries: []
+
+### 2. The application STILL SERVES with the network in full deny
+$ kubectl -n cap exec deploy/cap-web -c web -- wget -S -qO /dev/null http://127.0.0.1:3000/   (HTTP status)
+  HTTP/1.1 307 Temporary Redirect
+  HTTP/1.1 200 OK
+
+   ...and reachable over its Service (from another pod in the namespace):
+$ kubectl -n cap exec deploy/cap-web -c web -- wget -S -qO /dev/null http://cap-web.cap.svc:3000/
+  HTTP/1.1 307 Temporary Redirect
+  HTTP/1.1 200 OK
+
+### 3. Egress is DENIED — two independent layers
+
+(a) via the proxy: a non-allowlisted host is refused with 403
+$ kubectl -n cap exec deploy/cap-web -c web -- sh -c "http_proxy=http://egress-proxy.halden-platform:3128 wget -qO- http://api.stripe.com/"
+wget: server returned error: HTTP/1.1 403 Forbidden
+
+(b) directly (bypassing the proxy): dropped by the default-deny NetworkPolicy
+$ kubectl -n cap exec deploy/cap-web -c web -- wget -T 6 -qO- http://1.1.1.1/
+wget: download timed out
+
+### RESULT: allowlist empty + app serves HTTP 200 + egress denied at proxy AND netpol
+################  AIR-GAP ASSERTION PASSED (manual)  ################

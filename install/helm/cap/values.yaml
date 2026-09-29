@@ -34,8 +34,10 @@ images:
     pullPolicy: IfNotPresent
   mediaServer:
     # No public image exists — supply-chain/mirror.sh BUILDS this from Cap source
-    # and pushes it. There is no sensible public default.
-    registry: ""
+    # and pushes it. registry/repository are set so the ref is fully qualified (the
+    # admission policy requires it); global.imageRegistry overrides the registry on the
+    # private-registry path, giving <registry>/cap-media-server:mirrored (matches mirror.sh).
+    registry: ghcr.io
     repository: cap-media-server
     tag: "mirrored" # matches supply-chain/images.yaml build.tag
     digest: ""

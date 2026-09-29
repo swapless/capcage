@@ -60,11 +60,13 @@ mirroring — are in `docs/runbook.md` and use plain `helm`/`kubectl`/`terraform
 
 ## Docs
 
+- `docs/architecture.md` — the two planes + egress path + supply chain (diagrams).
 - `docs/decisions.md` — the calls made, rejected alternatives, tradeoffs, what was cut.
 - `docs/runbook.md` — operations, for the customer's on-call.
 - `docs/security-review.md` — every egress and permission justified; independent image
   verification; residual risks.
 - `docs/metrics.md` — how the customer scrapes metrics (pull; nothing leaves).
+- `docs/RECORDING.md` — the exact commands to record the demo (manual, no scripts).
 
 ## Scope notes
 

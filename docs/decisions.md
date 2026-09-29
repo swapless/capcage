@@ -81,9 +81,13 @@ customer's on-call does not depend on the demo tooling.
   from kind. Image refs are consistent across targets (verified with `helm template`), but
   "two targets" is proven on one. Close it: `terraform apply` in `envs/gke` and commit
   evidence.
-- **media-server is built/signed/run on neither target.** No public image; needs egress
-  (apt + `bun install`) the dev host lacks. Recipe is in `mirror.sh` (`CAP_SRC=...`); no
-  SBOM yet. Consequence: the air-gap proof covers web+DB+S3, not the media pipeline.
+- **media-server: build+sign path proven, but no working image from this host.** No public
+  image; build needs `apt` + `bun install`. On the dev host `apt` works but `bun install` is
+  only intermittently reachable — even a retry build produced an image missing a runtime dep
+  (`hono`) that crash-loops. The mechanics are proven (built, cosign-signed offline, SBOM
+  generated); a working image needs one clean `bun install` on a machine with reliable egress
+  (`CAP_SRC=/path/to/Cap ./supply-chain/mirror.sh`). Optional in the chart (default off on
+  kind). Consequence: the air-gap proof covers web+DB+S3, not the media pipeline.
 - **Ingress controller is a prerequisite, not shipped.** The chart creates the Ingress
   object only. Using ingress means mirroring the controller images (ingress-nginx +
   kube-webhook-certgen) too.
