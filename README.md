@@ -1,32 +1,29 @@
 # Cap in a cage
 
 Deploy Cap (an open-source screen recorder shipped only as docker-compose) into a
-locked-down enterprise Kubernetes environment and prove it runs with nothing relaxed:
-default-deny egress, a TLS-intercepting proxy, admission control, namespace-scoped RBAC,
-private-registry pulls. The app is not the assignment; the install is.
+locked-down Kubernetes environment: default-deny egress, a TLS-intercepting proxy,
+admission control, namespace-scoped RBAC, private-registry pulls.
 
-## Two planes
+## Layout
 
-- `platform/` — the cage (cluster-scoped, simulates the customer): kind cluster,
-  mitmproxy egress proxy + CA, default-deny NetworkPolicy, in-cluster registry, admission
-  policies, tenant RBAC, no-outbound CI runner, restricted PodSecurity + quotas.
-- `install/` — the tenant install: a Helm chart (`install/helm/cap`) and Terraform
-  (`install/terraform`, kind + GKE). Assumes nothing about the cluster — CNI, ingress,
-  StorageClass, and registry are all values with self-contained defaults.
+- `platform/` — the cage (cluster-scoped): kind cluster, mitmproxy egress proxy + CA,
+  default-deny NetworkPolicy, in-cluster registry, admission policies, tenant RBAC,
+  no-outbound CI runner, restricted PodSecurity + quotas.
+- `install/` — the tenant install: Helm chart (`install/helm/cap`) + Terraform
+  (`install/terraform`, kind + GKE). Assumes nothing about the cluster: CNI, ingress,
+  StorageClass, and registry are all values with defaults.
 
 ## Images & registry
 
 The repo ships the recipe and the public signing key, not the images.
 
-- Local cage (kind): `scripts/load-images.sh` pulls the public base images to the host and
-  loads them into kind with `kind load`. No registry involved.
-- Real deploy: `supply-chain/mirror.sh REGISTRY=<customer registry>/cap` mirrors every
-  image into the customer's private registry (Artifact Registry / ECR / ACR / Harbor /
-  Nexus), cosign-signs each (offline), and writes SBOMs. Install with
-  `--set global.imageRegistry=<customer registry>/cap`.
+- kind: `scripts/load-images.sh` pulls public images to the host and `kind load`s them.
+- Real deploy: `supply-chain/mirror.sh REGISTRY=<registry>/cap` mirrors each image into a
+  private registry (Artifact Registry / ECR / ACR / Harbor / Nexus), cosign-signs offline,
+  and writes SBOMs. Install with `--set global.imageRegistry=<registry>/cap`.
 - `media-server` has no public image; `mirror.sh` builds it from Cap source (`CAP_SRC=...`).
 
-## Proven (evidence/)
+## Proven (`evidence/`)
 
 | Claim | File |
 |---|---|
@@ -36,43 +33,40 @@ The repo ships the recipe and the public signing key, not the images.
 | Rollback recovers a half-applied upgrade | `rollback-proof.txt` |
 | Uninstall leaves nothing | `uninstall-proof.txt` |
 | Runner has no way out | `ci-runner-no-egress.txt` |
+| Second target (real GKE, then torn down) | `gke-target.txt` |
+| Recorded install | `install.cast` (`asciinema play`) |
 | Full suite | `verify.txt` |
 
-## Local demo (kind)
+## Quickstart (kind)
 
-Requires docker, kind, kubectl, helm, and host internet (to fetch public images once).
+Requires docker, kind, kubectl, helm, host internet (to fetch public images once).
 
 ```
-make up            # create the kind cage + apply platform policy
-make load-images   # pull public images to the host and load into kind
+make up            # create the cage + apply platform policy
+make load-images   # pull public images and load into kind
 make install       # deploy Cap
-make verify        # prove the cage bites and the app is healthy
+make verify        # cage bites; app healthy
 make air-gap       # proxy full-deny; app still serves
 ```
 
-Reach the app: `kubectl -n cap port-forward svc/cap-web 3000:3000`. Login code:
+App: `kubectl -n cap port-forward svc/cap-web 3000:3000`. Login code:
 `kubectl -n cap logs deploy/cap-web`.
 
-## Real deploy (customer cluster)
+## Real deploy
 
-Operational procedures — install, upgrade, rollback, uninstall, break-glass, backup,
-mirroring — are in `docs/runbook.md` and use plain `helm`/`kubectl`/`terraform`, not `make`.
+Install/upgrade/rollback/uninstall/break-glass/backup/mirroring: `docs/runbook.md`
+(plain `helm`/`kubectl`/`terraform`).
 
 ## Docs
 
-- `docs/architecture.md` — the two planes + egress path + supply chain (diagrams).
-- `docs/decisions.md` — the calls made, rejected alternatives, tradeoffs, what was cut.
-- `docs/runbook.md` — operations, for the customer's on-call.
-- `docs/security-review.md` — every egress and permission justified; independent image
-  verification; residual risks.
-- `docs/metrics.md` — how the customer scrapes metrics (pull; nothing leaves).
-- `docs/RECORDING.md` — the exact commands to record the demo (manual, no scripts).
+- `docs/architecture.md` — diagrams (two planes, egress, supply chain).
+- `docs/decisions.md` — calls made, alternatives, tradeoffs, cuts.
+- `docs/runbook.md` — operations, for the on-call.
+- `docs/security-review.md` — egress + permissions justified; image verification; residual risks.
+- `docs/metrics.md` — customer-scraped metrics (pull).
 
-## Scope notes
+## Notes
 
-- Two targets: both exercised — kind end-to-end, and the same chart deployed to a real
-  GKE cluster (PVCs on Persistent Disks, migrations, HTTP 200) then torn down
-  (`evidence/gke-target.txt`).
-- Object store is SeaweedFS: MinIO withdrew its public images in 2025 (decisions.md).
-- The dev host firewalls the docker bridge, so `kubectl`/`helm` were driven from a
-  container on the kind network and images `kind load`ed; irrelevant on a normal cluster.
+- Two targets: kind end-to-end, and the same chart on real GKE (PVCs on Persistent Disks,
+  migrations, HTTP 200), then torn down (`evidence/gke-target.txt`).
+- Object store is SeaweedFS (MinIO withdrew its public images in 2025 — `docs/decisions.md`).
