@@ -18,8 +18,13 @@ spec:
         operations: ["CREATE", "UPDATE"]
         resources: ["pods"]
   variables:
-    # The ONLY registries the tenant may pull from. In the real cage this is just
-    # the customer's private registry; here we also allow the sources we pre-loaded.
+    # The ONLY registries the tenant may pull from.
+    # PRIVATE-REGISTRY-ONLY POSTURE (production): make this just
+    #   ["registry.halden.internal/"]   (or your Artifact Registry / ECR / ACR prefix)
+    # and install with --set global.imageRegistry=<that registry>.
+    # On the kind DEMO we broaden to docker.io/ + ghcr.io/ because images are pre-
+    # `kind load`ed from those public sources rather than pulled through the in-cluster
+    # registry. See docs/security-review.md §4 ("Honest scope of the admission layer").
     - name: allowedRegistries
       expression: >-
         ["registry.halden.internal/", "docker.io/", "ghcr.io/"]

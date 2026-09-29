@@ -1,7 +1,9 @@
-# "A runner with no way out." A CI runner namespace whose pods can reach the
-# Kubernetes API and the private registry to do their job, but have NO route to the
-# internet — so a compromised build can't exfiltrate. Proven by the demo Job below,
-# which tries to reach the internet and fails.
+# "A runner with no way out." A CI runner namespace whose pods can reach ONLY
+# cluster DNS and the private registry (to pull what they build against) — and have
+# NO route to the internet or anything else, so a compromised build can't exfiltrate.
+# (If a runner needs the Kubernetes API to deploy, add an explicit egress rule to the
+# apiserver; we deliberately omit it here to keep the runner maximally sealed.)
+# Proven by the demo Job below, which tries to reach the internet and fails.
 apiVersion: v1
 kind: Namespace
 metadata:

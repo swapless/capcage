@@ -1,87 +1,65 @@
-# Metrics — the customer scrapes us (pull model)
+# Metrics
 
-We expose Prometheus metrics; **your** Prometheus scrapes them. Nothing is pushed
-anywhere, no metrics leave your network. This keeps the air-gap intact while giving
-you full operational visibility.
+Pull model: the customer's Prometheus scrapes the pods. Nothing is pushed; nothing leaves
+the network.
 
-## What's exposed
+## Exposed
 
 | Component | Endpoint | Port | Notes |
 |---|---|---|---|
-| Object store (SeaweedFS) | `/metrics` | 9091 | native Prometheus metrics (volume/filer/s3) |
-| MySQL | `/metrics` | 9104 | via the `mysqld_exporter` sidecar (connections, queries, buffer pool, replication) |
-| ingress-nginx | `/metrics` | 10254 | request rate/latency/status (when the bundled controller is enabled) |
-| cap-web (Next.js) | — | 3000 | **no native metrics**; scrape liveness via blackbox probe of `/` |
-| media-server | `/health` | 3456 | health only; blackbox probe |
+| SeaweedFS (object store) | `/metrics` | 9091 | native Prometheus metrics |
+| MySQL | `/metrics` | 9104 | `mysqld_exporter` sidecar |
+| ingress-nginx | `/metrics` | 10254 | when a controller is present |
+| cap-web | — | 3000 | no native metrics; blackbox-probe `/` |
+| media-server | `/health` | 3456 | health only; blackbox-probe |
 
-cap-web and media-server expose no Prometheus metrics (we don't modify Cap), so we cover
-them with **blackbox/health probing** — up/down + latency — which is what matters for SLOs.
+cap-web and media-server expose no Prometheus metrics (Cap is unmodified); cover them with
+blackbox up/down + latency probes, which is the SLO signal that matters.
 
-## How to scrape
+## Scrape — option A: Prometheus Operator
 
-Two options; pick what your monitoring stack uses.
-
-### A. Prometheus Operator (ServiceMonitors)
-
-If you run kube-prometheus-stack, enable ServiceMonitors and label them for your
-Prometheus's selector:
 ```
-helm upgrade cap install/helm/cap -n cap -f <profile> \
+helm upgrade cap <chart> -n cap -f <values> \
   --set metrics.serviceMonitor.enabled=true \
-  --set metrics.serviceMonitor.labels.release=kube-prometheus-stack
+  --set metrics.serviceMonitor.labels.release=<prometheus-release>
 ```
-This creates ServiceMonitors for the object store and MySQL exporter in namespace `cap`.
 
-### B. Annotation-based scraping (no Operator)
+Creates ServiceMonitors for the object store and MySQL exporter.
 
-Every metrics service is annotated so an annotation-relabel scrape config discovers it:
+## Scrape — option B: annotations (no Operator)
+
+The metrics services carry `prometheus.io/{scrape,port,path}` annotations. Discover them:
+
 ```yaml
-# prometheus.yml — add to scrape_configs
 - job_name: cap-endpoints
   kubernetes_sd_configs: [{ role: pod, namespaces: { names: [cap] } }]
   relabel_configs:
-    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-      action: keep
-      regex: "true"
-    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-      action: replace
-      target_label: __metrics_path__
-      regex: (.+)
-    - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-      action: replace
-      target_label: __address__
-      regex: ([^:]+)(?::\d+)?;(\d+)
-      replacement: $1:$2
+    - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], action: keep, regex: "true" }
+    - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], action: replace, target_label: __metrics_path__, regex: (.+) }
+    - { source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port], action: replace, target_label: __address__, regex: '([^:]+)(?::\d+)?;(\d+)', replacement: $1:$2 }
 ```
 
-### Blackbox for cap-web / media-server
+## Blackbox for cap-web / media-server
 
-Point your blackbox-exporter at these (they only need in-cluster reachability):
 ```yaml
 - job_name: cap-blackbox
   metrics_path: /probe
   params: { module: [http_2xx] }
-  static_configs:
-    - targets:
-        - http://cap-web.cap.svc:3000/
-        - http://cap-media-server.cap.svc:3456/health
+  static_configs: [{ targets: [ "http://cap-web.cap.svc:3000/", "http://cap-media-server.cap.svc:3456/health" ] }]
   relabel_configs:
-    - source_labels: [__address__]
-      target_label: __param_target
-    - target_label: __address__
-      replacement: blackbox-exporter.monitoring.svc:9115
+    - { source_labels: [__address__], target_label: __param_target }
+    - { target_label: __address__, replacement: blackbox-exporter.monitoring.svc:9115 }
 ```
 
-## Network note
+## Network
 
-Scraping is **pull, in-cluster**. Your Prometheus reaches these pods over the cluster
-network; nothing egresses. If your Prometheus lives in another namespace, allow ingress
-to `cap` from it (add a NetworkPolicy ingress rule — the default-deny in this repo is
-egress-only, so ingress scraping already works within the cluster).
+Scraping is in-cluster and pull-only; nothing egresses. If Prometheus is in another
+namespace, add an ingress NetworkPolicy allowing it into `cap` (the default-deny here is
+egress-only, so in-cluster ingress scraping already works).
 
-## Suggested alerts / SLOs
+## Suggested alerts
 
 - `up{job=~"cap.*"} == 0` for 5m → component down.
-- SeaweedFS volume free bytes < 15% → capacity.
-- mysqld_exporter `mysql_up == 0` → DB down.
-- blackbox `probe_success{target=~".*cap-web.*"} == 0` → app not serving (the SLO signal).
+- `mysql_up == 0` → DB down.
+- SeaweedFS volume free < 15% → capacity.
+- blackbox `probe_success{target=~".*cap-web.*"} == 0` → app not serving.

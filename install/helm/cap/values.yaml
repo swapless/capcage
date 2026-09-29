@@ -26,7 +26,10 @@ images:
   web:
     registry: ghcr.io
     repository: capsoftware/cap-web
-    tag: "latest"
+    # Pinned (never :latest — admission forbids it). Upstream only publishes
+    # :latest, so mirror.sh retags to this. Same value on both targets so the
+    # chart ref and the mirror push line up under global.imageRegistry.
+    tag: "mirrored-8ee4cbd"
     digest: "" # e.g. sha256:... (set by mirror.sh; preferred over tag)
     pullPolicy: IfNotPresent
   mediaServer:
@@ -34,7 +37,7 @@ images:
     # and pushes it. There is no sensible public default.
     registry: ""
     repository: cap-media-server
-    tag: "local"
+    tag: "mirrored" # matches supply-chain/images.yaml build.tag
     digest: ""
     pullPolicy: IfNotPresent
   mysql:
@@ -95,8 +98,8 @@ secrets:
 egress:
   proxy:
     enabled: false # cage step flips this on
-    http: "" # e.g. http://squid.halden-platform.svc:3128
-    https: "" # e.g. http://squid.halden-platform.svc:3128
+    http: "" # e.g. http://egress-proxy.halden-platform.svc:3128
+    https: "" # e.g. http://egress-proxy.halden-platform.svc:3128
     # Hosts that must bypass the proxy (in-cluster services, cluster CIDR).
     noProxy: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
   # Inject the proxy's intercepting CA so TLS to allowlisted hosts doesn't break.
@@ -118,14 +121,18 @@ persistence:
   accessModes: ["ReadWriteOnce"]
 
 # -----------------------------------------------------------------------------
-# Ingress — bring-our-own, toggleable. Ships ingress-nginx as a dependency
-# (see charts/) but can be disabled if the customer has their own.
+# Ingress — toggleable. `enabled` creates the Ingress OBJECT only. An ingress
+# CONTROLLER is a documented PREREQUISITE (docs/runbook.md): the chart does not
+# ship or install one — `installController` is a scoping flag for that future
+# work and is currently a NO-OP. If you use ingress, the controller's images
+# (ingress-nginx controller + kube-webhook-certgen) must also be mirrored into
+# your registry. On kind we skip ingress and use port-forward.
 # -----------------------------------------------------------------------------
 ingress:
   enabled: true
-  # If the customer already runs an ingress controller, set installController=false
-  # and point className at theirs.
-  installController: true
+  # Set className to your controller's class. installController is a no-op today
+  # (see note above); a controller must already exist in the cluster.
+  installController: false
   className: "nginx"
   webHost: "cap.halden.local"
   s3Host: "s3.halden.local"

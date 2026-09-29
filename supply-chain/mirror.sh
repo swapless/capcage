@@ -42,8 +42,11 @@ count=$(yq '.images | length' "$IMAGES_YAML")
 for i in $(seq 0 $((count-1))); do
   src=$(yq -r ".images[$i].source" "$IMAGES_YAML")
   name=$(yq -r ".images[$i].name" "$IMAGES_YAML")
+  repo=$(yq -r ".images[$i].repository" "$IMAGES_YAML")
   tag=$(yq -r ".images[$i].tag" "$IMAGES_YAML")
-  dst="$REGISTRY/$name:$tag"
+  # Keep the chart's repository path so $REGISTRY/<repo>:<tag> == the chart's ref
+  # under --set global.imageRegistry=$REGISTRY.
+  dst="$REGISTRY/$repo:$tag"
   echo "-> $name ($src -> $dst)"
   docker pull "$src"
   docker tag "$src" "$dst"
@@ -53,10 +56,11 @@ done
 # Build media-server from Cap source (needs egress for apt/bun).
 if [ -n "${CAP_SRC:-}" ] && [ -d "$CAP_SRC" ]; then
   bname=$(yq -r '.build[0].name' "$IMAGES_YAML")
+  brepo=$(yq -r '.build[0].repository' "$IMAGES_YAML")
   btag=$(yq -r '.build[0].tag' "$IMAGES_YAML")
   bfile=$(yq -r '.build[0].dockerfile' "$IMAGES_YAML")
   bctx=$(yq -r '.build[0].context' "$IMAGES_YAML")
-  dst="$REGISTRY/$bname:$btag"
+  dst="$REGISTRY/$brepo:$btag"
   echo "-> building $bname from $CAP_SRC"
   docker build --network=host -f "$CAP_SRC/$bfile" -t "$dst" "$CAP_SRC/$bctx"
   sign_and_sbom "$dst" "$bname"

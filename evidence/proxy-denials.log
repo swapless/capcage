@@ -1,6 +1,15 @@
-# Egress proxy denial log — clean cage, empty (air-gap) allowlist
-# Captured 2026-09-27T10:36:58Z from deploy/egress-proxy (mitmproxy) in ns halden-platform
-# A log with NO denials would mean the cage was loosened. These are real blocks.
+command terminated with exit code 1
+command terminated with exit code 1
+command terminated with exit code 1
+command terminated with exit code 1
+# Egress proxy denial log — tenant egress attempts, empty (air-gap) allowlist.
+# Every non-allowlisted host is refused with 403 and logged. A log with no
+# denials would mean the cage was loosened.
 
-[10:35:01.784] [cage-proxy] loaded 0 allow entries: []
-[10:36:08.656] [cage-proxy] DENY GET example.com/
+[12:49:35.077] [cage-proxy] loaded 0 allow entries: []
+[12:49:40.536] [cage-proxy] DENY GET warmup.invalid/
+[12:49:41.454] [cage-proxy] DENY GET example.com/
+[12:49:58.803] [cage-proxy] DENY GET api.stripe.com/
+[12:49:58.883] [cage-proxy] DENY GET api.openai.com/
+[12:49:58.962] [cage-proxy] DENY GET registry-1.docker.io/
+[12:49:59.042] [cage-proxy] DENY GET telemetry.vendor.example/

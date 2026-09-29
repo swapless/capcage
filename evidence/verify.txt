@@ -1,3 +1,4 @@
+./scripts/verify.sh
 == 1. Cap pods Ready ==
   PASS: all pods ready
 == 2. Namespace-scoped RBAC (no cluster power) ==

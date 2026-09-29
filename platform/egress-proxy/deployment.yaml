@@ -62,6 +62,8 @@ spec:
             - /etc/proxy/allowlist.py
           env:
             - { name: ALLOWLIST_PATH, value: /etc/proxy/allowlist.txt }
+            # Flush stdout/stderr immediately so ALLOW/DENY lines appear in `kubectl logs`.
+            - { name: PYTHONUNBUFFERED, value: "1" }
           ports:
             - { name: proxy, containerPort: 3128 }
           readinessProbe:

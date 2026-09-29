@@ -8,7 +8,7 @@
 # Tool binaries are overridable so this works in constrained environments:
 #   make install KUBECTL="kubectl --context foo" HELM="helm"
 # =============================================================================
-SHELL      := /usr/bin/env bash
+SHELL      := bash
 .ONESHELL:
 .SHELLFLAGS := -euo pipefail -c
 

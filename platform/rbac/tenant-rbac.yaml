@@ -24,9 +24,15 @@ rules:
   - apiGroups: [batch]
     resources: [jobs, cronjobs]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Ingresses only. NetworkPolicies are deliberately NOT grantable to the tenant —
+  # the platform owns the default-deny cage; the caged party must not be able to
+  # delete the policy that cages it. (get/list so the tenant can SEE the policy.)
   - apiGroups: [networking.k8s.io]
-    resources: [ingresses, networkpolicies]
+    resources: [ingresses]
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
     verbs: [get, list, watch, create, update, patch, delete]

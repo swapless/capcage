@@ -3,9 +3,9 @@
 #
 # Nothing in `cap` may egress EXCEPT:
 #   1. cluster DNS (so names resolve),
-#   2. the platform egress proxy (Squid) — the ONLY path off-namespace,
+#   2. the platform egress proxy (mitmproxy) — the ONLY path off-namespace,
 #   3. other pods in the same namespace (web <-> mysql <-> s3 <-> media-server).
-# Everything else is denied. Any external call must go through Squid, where it is
+# Everything else is denied. Any external call must go through the proxy, where it is
 # allowlisted or logged as a denial.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

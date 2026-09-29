@@ -19,6 +19,10 @@ $KUBECTL -n "$NS_PLATFORM" create configmap egress-allowlist \
   --from-literal=allowlist.txt="" --dry-run=client -o yaml | $KUBECTL apply -f -
 $KUBECTL -n "$NS_PLATFORM" rollout restart deploy/egress-proxy
 $KUBECTL -n "$NS_PLATFORM" rollout status deploy/egress-proxy --timeout=90s
+# The freshly-restarted proxy regenerates its dhparam in a clean confdir, so warm it
+# with one request before asserting (first request can be slow).
+$KUBECTL -n "$NS_TENANT" exec deploy/cap-web -c web -- \
+  sh -c "http_proxy=http://$PROXY wget -T 25 -qO- http://warmup.invalid/ >/dev/null 2>&1" || true
 
 echo "== 2. App still serving? (cap-web HTTP status) =="
 code=$($KUBECTL -n "$NS_TENANT" exec deploy/cap-web -c web -- \
@@ -31,7 +35,7 @@ fi
 
 echo "== 3. Egress actually blocked? (tenant -> internet via proxy must be denied) =="
 out=$($KUBECTL -n "$NS_TENANT" exec deploy/cap-web -c web -- \
-  sh -c "http_proxy=http://$PROXY wget -T 8 -qO- http://example.com/ 2>&1" || true)
+  sh -c "http_proxy=http://$PROXY wget -T 20 -qO- http://example.com/ 2>&1" || true)
 if echo "$out" | grep -q "403"; then
   echo "   OK: proxy denied egress (403)"
 else

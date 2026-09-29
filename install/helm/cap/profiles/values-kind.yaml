@@ -1,13 +1,10 @@
 # Profile: local kind cage.
 # Only what differs from values.yaml for the constrained local target.
 
-# cap-web is pinned to a non-:latest tag to satisfy the cage's admission policy.
-# (Upstream only publishes :latest; the real supply-chain/mirror.sh pins by DIGEST
-# against the private registry. On kind we use a pinned tag because `kind load`
-# carries tags, not digest associations — digest pinning works on a real registry.)
-images:
-  web:
-    tag: "mirrored-8ee4cbd"
+# cap-web's pinned tag (images.web.tag=mirrored-8ee4cbd) is set in the base
+# values.yaml and shared by both targets. On kind we use a pinned TAG rather than a
+# digest because `kind load` carries tags, not digest associations; mirror.sh pins
+# by digest against a real registry.
 
 # Persistence: leave storageClassName empty to use kind's default provisioner
 # (rancher.io/local-path, StorageClass "standard"). Proves the "assume no
@@ -20,8 +17,8 @@ persistence:
 mediaServer:
   enabled: false
 
-# For the first bring-up we reach the app via port-forward; the ingress
-# controller is installed by the platform step in the full flow.
+# On kind we reach the app via `kubectl port-forward` (no ingress controller is
+# installed on this target — see the ingress note in values.yaml).
 ingress:
   enabled: false
   installController: false

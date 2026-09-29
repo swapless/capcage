@@ -1,131 +1,119 @@
-# Security Review — Cap in the Halden cage
+# Security review — Cap
 
-For a reviewer with veto power who does not trust us. Every egress has a reason,
-every permission a justification, every image an independent verification path. If
-approving this required a call with us, we failed. It shouldn't.
+For a reviewer with veto power who does not trust the vendor. Every egress has a reason,
+every permission a justification, every image an independent verification path. Claims are
+verifiable with the commands inline and the files in `evidence/`.
 
-Scope: the tenant install (`install/`) running in namespace `cap`, and the platform
-controls (`platform/`) that constrain it. Verify claims with the commands inline and
-the artifacts in `evidence/`.
+Scope: the tenant install in namespace `cap` and the platform controls that constrain it.
 
----
+## 1. Data crossing the boundary: none
 
-## 1. What data crosses the boundary: nothing.
+The install makes no unconditional outbound calls at runtime.
 
-The install makes **zero unconditional outbound calls** at runtime. Proven, not asserted:
+- The proxy's permanent allowlist is empty (`allowlist.yaml`, `permanent: []`).
+- With the proxy in full deny, cap-web still serves HTTP 200 (`evidence/air-gap-proof.txt`).
+- The denial log shows real blocks, not an empty file (`evidence/proxy-denials.log`).
 
-- The egress proxy's permanent allowlist is **empty** (`allowlist.yaml` → `permanent: []`).
-- With the proxy in **full deny**, the app still serves HTTP 200
-  (`evidence/air-gap-proof.txt`, reproducible via `make air-gap`).
-- The proxy denial log shows real blocks, not an empty log
-  (`evidence/proxy-denials.log`).
+Two independent layers enforce this:
 
-Two layers enforce this, independently:
-
-1. **NetworkPolicy default-deny egress** (`platform/netpol/egress.yaml`). Pods in `cap`
-   may egress only to (a) cluster DNS, (b) the egress proxy, (c) other pods in `cap`.
-   Everything else is dropped. Verify:
+1. Default-deny egress `NetworkPolicy` (`platform/netpol/egress.yaml`): pods in `cap` egress
+   only to DNS, the proxy, and same-namespace pods. Verify:
    ```
    kubectl exec -n cap deploy/cap-web -c web -- \
      node -e 'require("net").connect(443,"10.96.0.1",()=>console.log("OPEN")).on("error",()=>console.log("BLOCKED"))'
-   # -> BLOCKED (cannot even reach the Kubernetes API)
+   # BLOCKED
    ```
-2. **Forward proxy, default-deny allowlist** (`platform/egress-proxy/`). The only egress
-   path is the proxy, which denies any host not explicitly allowlisted and logs it.
+2. Forward proxy, default-deny allowlist (`platform/egress-proxy/`): the only egress path;
+   denies and logs any non-allowlisted host.
 
-No telemetry, no license check, no analytics. Cap's optional integrations (Sentry,
-OpenPanel, Tinybird, Stripe, AI providers) are all gated on env vars we do not set.
+The tenant cannot remove layer 1: `cap-deployer` has read-only access to NetworkPolicies.
 
 ## 2. Every egress, with its reason
 
-There is no permanent runtime egress. The only egress that ever exists is:
+| Scope | Hosts | Reason | Where |
+|---|---|---|---|
+| permanent | none | the install needs no runtime egress | — |
+| install-time | ghcr.io, *.githubusercontent.com, registry-1.docker.io, auth.docker.io, production.cloudflare.docker.com, deb.debian.org, security.debian.org, registry.npmjs.org | pull/build images to mirror into the private registry | the bastion running `mirror.sh` only |
+| optional | accounts.google.com, oauth2.googleapis.com (Google SSO); api.resend.com (email) | only if the customer enables that feature | cap-web |
 
-| Scope | FQDN(s) | Why | Who | When |
-|---|---|---|---|---|
-| **permanent** | *(none)* | the install needs no runtime egress | — | — |
-| **install-time** | ghcr.io, pkg-containers.githubusercontent.com, registry-1.docker.io, auth.docker.io, production.cloudflare.docker.com, deb.debian.org, security.debian.org, registry.npmjs.org | pull/build the images to **mirror them into the private registry** | the **bastion** running `supply-chain/mirror.sh` | once, offline of the tenant |
-| **optional** | accounts.google.com, oauth2.googleapis.com (Google SSO); api.resend.com (email) | only if the customer turns those features on | cap-web | only when explicitly enabled |
-
-The install-time hosts are **never** granted to the tenant namespace or the CI runner.
-They belong to the bastion that populates the registry. The tenant and the runner run
-with no route to any of them. Full detail per entry (port, component, what breaks
-without it) is in `allowlist.yaml`.
+Install-time hosts are never granted to the tenant namespace or the CI runner. Per-entry
+detail (port, component, breaks-without-it) is in `allowlist.yaml`.
 
 ## 3. Every permission, with its justification
 
-- **Namespace-scoped RBAC only** (`platform/rbac/tenant-rbac.yaml`). The deployer
-  identity (`cap-deployer`) can manage namespaced objects in `cap` and nothing else. It
-  has **no cluster-scoped power**. Verify:
-  ```
-  kubectl auth can-i get nodes --as=system:serviceaccount:cap:cap-deployer   # -> no
-  kubectl auth can-i '*' '*' --as=system:serviceaccount:cap:cap-deployer -A  # -> no
-  ```
-- **Workload ServiceAccount has no API access.** `automountServiceAccountToken: false`
-  — nothing in Cap talks to the Kubernetes API, so it gets no token.
-- **All pods run restricted.** The `cap` namespace enforces the restricted Pod Security
-  Standard: non-root, `allowPrivilegeEscalation: false`, all capabilities dropped,
-  seccomp `RuntimeDefault`. Verify: try to create a root pod → admission rejects it.
-- **No privileged platform access is granted to the tenant.** The proxy, registry, and
-  policies live in `halden-platform`, which the tenant RBAC cannot touch.
+- Namespace-scoped RBAC only (`platform/rbac/tenant-rbac.yaml`): `cap-deployer` manages
+  namespaced objects in `cap` and has no cluster power, and only read access to
+  NetworkPolicies. Verify: `kubectl auth can-i get nodes --as=system:serviceaccount:cap:cap-deployer` → `no`.
+- Workload pods run under the chart ServiceAccount with `automountServiceAccountToken:
+  false`; nothing in Cap uses the API, so no token is mounted. Verify:
+  `kubectl -n cap get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].spec.serviceAccountName} {.items[0].spec.automountServiceAccountToken}'`
+  → `cap false`.
+- Restricted PodSecurity on `cap`: non-root, no privilege escalation, all capabilities
+  dropped, seccomp `RuntimeDefault`. A root pod is rejected at admission.
+- The proxy, registry, and policies live in `halden-platform`, which tenant RBAC cannot touch.
 
-## 4. How you verify our images without taking our word for it
+## 4. Independent image verification
 
-Every image is mirrored into the private registry, **signed with cosign**, and shipped
-with an SBOM. You verify against the public key in `supply-chain/cosign.pub` — a key you
-can inspect; you never have to trust our build:
+Every mirrored image is cosign-signed and shipped with an SBOM. Verify against the
+committed public key — no trust in the vendor's build required:
 
 ```
 cosign verify --key supply-chain/cosign.pub --insecure-ignore-tlog=true \
-  <registry>/cap/cap-web@sha256:<digest>
+  <registry>/cap/capsoftware/cap-web:mirrored-8ee4cbd
 ```
 
-- Verifying with our published key **passes**; verifying with any other key **fails**
-  ("no matching signatures"). Both shown in `evidence/image-verification.txt`.
-- Signing is **offline** (`--tlog-upload=false`) — it does not contact Sigstore/Rekor,
-  so it works on an air-gapped bastion and introduces no third-party trust.
-- SBOMs (`supply-chain/sbom/*.spdx.json.gz`, SPDX, generated by syft) let you audit the
-  package contents of each image independently.
+- Verifying with the published key passes; any other key fails (`evidence/image-verification.txt`).
+- Signing is offline (`--tlog-upload=false`): no Sigstore/Rekor contact, no third-party trust.
+- SBOMs (`supply-chain/sbom/*.spdx.json.gz`, SPDX/syft) allow independent content audit.
 
-Enforcement at admission (defense in depth):
+Admission enforcement (defense in depth):
 
-- **Native ValidatingAdmissionPolicy** (`platform/policies/admission-policies.yaml`)
-  rejects any pod whose image is not from the allowed registry, or is `:latest`/unpinned.
-  Verified denying `evil.example.com/x:1.0` and `busybox:latest`, admitting `busybox:1.36`.
-- **Kyverno `verifyImages`** (`platform/policies/kyverno-verify-images.yaml`) rejects any
-  image in `cap` lacking a valid signature from our key — applied where Kyverno is present.
+- Native `ValidatingAdmissionPolicy` denies images not from an allowed registry, or
+  `:latest`/unpinned. Refs must be fully qualified: `evil.example.com/x:1.0` and
+  `docker.io/library/busybox:latest` are denied; `docker.io/library/busybox:1.36` is admitted.
+- Kyverno `verifyImages` denies images under the private-registry prefix that lack a valid
+  signature (applied where Kyverno is present).
+
+Honest scope of admission:
+- On kind, `allowedRegistries` is broadened to `docker.io/`+`ghcr.io/` because demo images
+  are `kind load`ed from public sources, so kind is not literally private-registry-only. The
+  production posture (allowlist = private prefix, `--set global.imageRegistry=<registry>`) is
+  a one-line change, marked in the policy file.
+- Kyverno signature enforcement matches only the private-registry prefix. Images from
+  docker.io/ghcr.io (the kind path) are not signature-checked at admission; on kind
+  signatures are verified out-of-band with `cosign verify`.
 
 ## 5. Data flows
 
 ```
-end user ──HTTPS──> ingress ──> cap-web (Next.js) ──┬──> MySQL (in-cluster, PVC)
-                                                     ├──> SeaweedFS S3 (in-cluster, PVC)
-                                                     └──> media-server (in-cluster)
-browser playback ──HTTPS──> ingress (S3 host) ──> SeaweedFS  (read-only object GET)
+user ──HTTPS──> ingress ──> cap-web ──┬──> MySQL (in-cluster PVC)
+                                      ├──> SeaweedFS S3 (in-cluster PVC)
+                                      └──> media-server (in-cluster)
+playback ──HTTPS──> ingress (S3 host) ──> SeaweedFS (read-only GET)
 ```
 
-- All application data (DB rows, recordings) stays **in-cluster** on PersistentVolumes.
-  Nothing is sent to a managed cloud service or off the network.
-- Backups (`mysqldump`) are written to the in-cluster S3 bucket by a CronJob — they do
-  not leave the network either.
-- Secrets (`DATABASE_ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, DB/S3 credentials) are generated
-  at install time into a Kubernetes Secret, never committed, and reused across upgrades
-  (not rotated mid-life, which would break decryption). An external secret manager can be
-  substituted via `secrets.existingSecret`.
+- Application data and backups stay in-cluster on PersistentVolumes; nothing goes to a
+  managed service or off-network.
+- Secrets (`DATABASE_ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, DB/S3 credentials) are generated at
+  install into a Secret, never committed, reused across upgrades (not rotated mid-life —
+  that would break decryption). External secret managers via `secrets.existingSecret`.
 
-## 6. TLS interception is handled, not fought
+## 6. TLS interception
 
-The customer's proxy terminates TLS and presents its own CA. We inject that CA into the
-Cap containers (`NODE_EXTRA_CA_CERTS`) and route egress through the proxy
-(`HTTP(S)_PROXY`, `NO_PROXY`) — so if the customer ever enables an optional egress, it
-works through the intercepting proxy instead of failing on a cert error. This is opt-in
-(`egress.proxy.enabled`, `egress.ca.enabled`) and off in the air-gapped default.
+The customer proxy terminates TLS with its own CA. The chart injects that CA
+(`NODE_EXTRA_CA_CERTS`) and routes egress through the proxy, so any enabled egress works
+through interception instead of failing on a cert error. Opt-in (`egress.proxy.enabled`,
+`egress.ca.enabled`); off in the air-gapped default.
 
-## 7. Residual risks we're declaring
+## 7. Residual risks (declared)
 
-- **SeaweedFS open S3 auth** in the cage default (no per-user S3 policies); mitigated by
-  namespace network isolation and a read-only public S3 ingress. Production: enable
-  SeaweedFS identities / use the customer's object store.
-- **Single-replica MySQL/object store** — availability risk, not a confidentiality one.
-  Mitigated by backups; HA is a documented upgrade.
-- **mitmproxy stands in for the customer's real proxy** in the cage; in production the
-  customer's own proxy enforces the same contract.
+- DNS is an open channel: egress to CoreDNS is allowed and CoreDNS forwards upstream, so a
+  compromised pod could DNS-tunnel out. Close with a split-horizon resolver (no upstream) or
+  an egress firewall on CoreDNS. Not yet closed.
+- Admission does not cover `ephemeralContainers` (`kubectl debug`); impact limited because
+  `cap-deployer` lacks that verb. Extend the VAP `matchConstraints` to close it.
+- Air-gap proof covers web+DB+S3, not the media pipeline (media-server not built on kind).
+- SeaweedFS open S3 auth in the cage default; mitigated by network isolation + read-only
+  public ingress. Production: SeaweedFS identities or the customer's object store.
+- Single-replica MySQL/object store — availability, not confidentiality; mitigated by backups.
+- mitmproxy stands in for the customer's real proxy in the cage.

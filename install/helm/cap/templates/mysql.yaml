@@ -49,6 +49,8 @@ spec:
         {{- include "cap.labels" . | nindent 8 }}
         {{- include "cap.selectorLabels" (dict "root" . "component" "mysql") | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "cap.fullname" . }}
+      automountServiceAccountToken: false
       {{- include "cap.imagePullSecrets" . | nindent 6 }}
       securityContext:
         {{- toYaml .Values.mysql.podSecurityContext | nindent 8 }}

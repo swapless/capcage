@@ -57,8 +57,15 @@ resource "kubernetes_role_v1" "deployer" {
   }
   rule {
     api_groups = ["apps", "batch", "networking.k8s.io"]
-    resources  = ["deployments", "statefulsets", "jobs", "cronjobs", "ingresses", "networkpolicies"]
+    resources  = ["deployments", "statefulsets", "jobs", "cronjobs", "ingresses"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+  # NetworkPolicies: read-only for the tenant — the platform owns the cage; the
+  # caged party must not be able to delete the policy that cages it.
+  rule {
+    api_groups = ["networking.k8s.io"]
+    resources  = ["networkpolicies"]
+    verbs      = ["get", "list", "watch"]
   }
 }
 

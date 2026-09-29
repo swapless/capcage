@@ -1,29 +1,41 @@
 # Source -> mirror map for every image the Cap install needs.
-# mirror.sh pulls each `source` (on a bastion with temporary egress), retags it
-# under the destination registry as `name:tag`, pushes, cosign-signs by digest,
-# and emits an SBOM. Nothing here is :latest — all pinned.
 #
-# media-server has NO public image: it is BUILT from Cap source and pushed here.
+# `repository` + `tag` MUST match install/helm/cap/values.yaml images.* so that,
+# with `--set global.imageRegistry=$REGISTRY`, the chart's image ref
+#   $REGISTRY/<repository>:<tag>
+# is EXACTLY what mirror.sh pushes. (The cap.image helper keeps the repository path
+# and only swaps the registry, so the mirror must keep the same repository path.)
+#
+# mirror.sh pulls each `source` on a bastion with temporary egress, retags to
+# $REGISTRY/<repository>:<tag>, pushes, cosign-signs by digest, and SBOMs.
+# Nothing is :latest.
 images:
   - name: cap-web
     source: ghcr.io/capsoftware/cap-web:latest # upstream only tags :latest
-    tag: mirrored-8ee4cbd                       # pinned on mirror (digest recorded in SBOM)
+    repository: capsoftware/cap-web
+    tag: mirrored-8ee4cbd
   - name: mysql
     source: docker.io/library/mysql:8.0
+    repository: library/mysql
     tag: "8.0"
   - name: seaweedfs
     source: docker.io/chrislusf/seaweedfs:3.80
+    repository: chrislusf/seaweedfs
     tag: "3.80"
   - name: aws-cli
     source: docker.io/amazon/aws-cli:2.27.49
+    repository: amazon/aws-cli
     tag: "2.27.49"
   - name: mysqld-exporter
     source: docker.io/prom/mysqld-exporter:v0.15.1
+    repository: prom/mysqld-exporter
     tag: "v0.15.1"
 
 # Built from source (no public image). mirror.sh builds this from the Cap repo.
+# repository/tag match values.yaml images.mediaServer.
 build:
   - name: cap-media-server
     context: apps/media-server
     dockerfile: apps/media-server/Dockerfile.standalone
+    repository: cap-media-server
     tag: mirrored

@@ -21,6 +21,8 @@ spec:
         {{- include "cap.selectorLabels" (dict "root" . "component" "minio-setup") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
+      serviceAccountName: {{ include "cap.fullname" . }}
+      automountServiceAccountToken: false
       {{- include "cap.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true

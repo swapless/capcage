@@ -3,7 +3,11 @@
 # Design notes:
 # - disableDefaultCNI is left FALSE: we keep kindnet (a plain, NetworkPolicy-capable CNI).
 #   We deliberately do NOT use Cilium — the customer's CNI is unknown, so ALL enforcement
-#   must be CNI-agnostic (default-deny NetworkPolicy + the Squid egress proxy).
+#   must be CNI-agnostic (default-deny NetworkPolicy + the mitmproxy egress proxy).
+# - REPRODUCIBILITY: the node image is PINNED. kindnet only enforces NetworkPolicy on
+#   recent releases; the whole default-deny cage depends on it, so we pin the exact node
+#   image and require kind >= 0.30. On an older node image, NetworkPolicies are silently
+#   ignored and the cage would not bite.
 # - PodSecurity is enforced per-namespace via labels (see platform/constraints), not via a
 #   cluster-wide API-server config. This keeps kind bring-up robust and lets us bring Cap up
 #   first, then tighten the cage around it.
@@ -14,6 +18,7 @@ apiVersion: kind.x-k8s.io/v1alpha4
 name: halden
 nodes:
   - role: control-plane
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     extraPortMappings:
       # ingress-nginx (tenant plane) reachable from the host for the recorded demo.
       - containerPort: 30080
@@ -23,6 +28,7 @@ nodes:
         hostPort: 8443
         protocol: TCP
   - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     # "Something that fights you": a tainted node the tenant must tolerate or avoid.
     kubeadmConfigPatches:
       - |
@@ -33,3 +39,4 @@ nodes:
               value: "platform"
               effect: "NoSchedule"
   - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5

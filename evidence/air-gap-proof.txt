@@ -1,9 +1,11 @@
+./scripts/air-gap-assert.sh
 == 1. Force the proxy into full-deny (empty allowlist) ==
 configmap/egress-allowlist unchanged
 deployment.apps/egress-proxy restarted
 Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "egress-proxy" rollout to finish: 1 old replicas are pending termination...
 deployment "egress-proxy" successfully rolled out
+command terminated with exit code 1
 == 2. App still serving? (cap-web HTTP status) ==
    OK: cap-web returned HTTP 200 with the proxy in full deny
 == 3. Egress actually blocked? (tenant -> internet via proxy must be denied) ==
