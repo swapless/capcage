@@ -1,0 +1,27 @@
+# GKE second-target proof — same chart, real cloud, in-cluster MySQL+S3 on Persistent Disks
+# context: <gke-cluster>   namespace: cap-selftest   2026-09-29T13:47:35Z
+
+## pods (same chart as kind; only the values profile + storage differ)
+NAME                                READY   STATUS    RESTARTS   AGE
+cap-selftest-minio-0                1/1     Running   0          99s
+cap-selftest-minio-setup-jwws9      1/1     Running   0          13s
+cap-selftest-mysql-0                2/2     Running   0          99s
+cap-selftest-web-86c68b7b46-ch9qx   1/1     Running   0          99s
+
+## PVCs bound on GKE Persistent Disks (pd.csi.storage.gke.io, standard-rwo)
+NAME                        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+data-cap-selftest-minio-0   Bound    pvc-<redacted>   50Gi       RWO            standard-rwo   <unset>                 100s
+data-cap-selftest-mysql-0   Bound    pvc-<redacted>   20Gi       RWO            standard-rwo   <unset>                 100s
+
+## migrations ran against in-cluster MySQL
+Waiting 5 seconds to run migrations
+🔍 DB migrations triggered
+💿 Running DB migrations...
+💿 Migrations run successfully!
+
+## app serving (HTTP status from inside the web pod)
+  HTTP/1.1 307 Temporary Redirect
+  HTTP/1.1 200 OK
+
+## teardown (2026-09-29T13:49:19Z)
+namespace deleted; no leftover PVCs/PVs/release — GKE PDs reclaimed (reclaimPolicy=Delete).

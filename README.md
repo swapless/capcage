@@ -70,8 +70,9 @@ mirroring — are in `docs/runbook.md` and use plain `helm`/`kubectl`/`terraform
 
 ## Scope notes
 
-- Two targets: kind is exercised end-to-end; the GKE Terraform is authored and
-  `validate`-clean but not applied to a live cluster (see decisions.md).
+- Two targets: both exercised — kind end-to-end, and the same chart deployed to a real
+  GKE cluster (PVCs on Persistent Disks, migrations, HTTP 200) then torn down
+  (`evidence/gke-target.txt`).
 - Object store is SeaweedFS: MinIO withdrew its public images in 2025 (decisions.md).
 - The dev host firewalls the docker bridge, so `kubectl`/`helm` were driven from a
   container on the kind network and images `kind load`ed; irrelevant on a normal cluster.

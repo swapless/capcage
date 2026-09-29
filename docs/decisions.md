@@ -75,12 +75,18 @@ Chosen: `Makefile` for the local demo. Rejected: Taskfile. Reason: `make` needs 
 The operational runbook uses plain `helm`/`kubectl`/`terraform`, not `make`, so the
 customer's on-call does not depend on the demo tooling.
 
+## Second target — proven on real GKE
+
+The same chart was deployed to a real GKE cluster (an isolated `cap-selftest`
+namespace): SeaweedFS + MySQL came up with PVCs bound on GKE Persistent
+Disks (`standard-rwo`, pd.csi), migrations ran, and cap-web served HTTP 200 — then it was
+torn down (namespace deleted, PDs reclaimed). Evidence: `evidence/gke-target.txt`. Only the
+values profile and the StorageClass differed from kind; the chart was unchanged. The
+Terraform `envs/gke` module (Artifact Registry + Workload Identity + tenant) is authored and
+`validate`-clean; the live proof above used Helm directly against the existing cluster.
+
 ## Cut — stated plainly, nothing oversold
 
-- **GKE is authored and `terraform validate`-clean, not applied live.** All evidence is
-  from kind. Image refs are consistent across targets (verified with `helm template`), but
-  "two targets" is proven on one. Close it: `terraform apply` in `envs/gke` and commit
-  evidence.
 - **media-server: build+sign path proven, but no working image from this host.** No public
   image; build needs `apt` + `bun install`. On the dev host `apt` works but `bun install` is
   only intermittently reachable — even a retry build produced an image missing a runtime dep
